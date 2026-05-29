@@ -4,36 +4,36 @@ import FinanceDataReader as fdr
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
+try:
+    import yfinance as yf
+except ImportError:
+    import os
+    os.system('pip install yfinance')
+    import yfinance as yf
+
 st.set_page_config(page_title="AI 매집주 분석기", layout="wide")
 
 # 1. 데이터 로드 (가나다순 정렬 및 캐싱)
 @st.cache_data(ttl=86400)
 def get_all_market_list():
-    kospi = fdr.StockListing('KOSPI')[['Code', 'Name']]
-    kosdaq = fdr.StockListing('KOSDAQ')[['Code', 'Name']]
+    kospi = fdr.StockListing('KOSPI')[['Code', 'Name']].copy()
+    kosdaq = fdr.StockListing('KOSDAQ')[['Code', 'Name']].copy()
     return pd.concat([kospi, kosdaq]).sort_values(by='Name')
 
 all_stocks = get_all_market_list()
 
-# ⚡ [로직 업그레이드] 점수 계산 및 상세한 매집 이유 생성
+# 2. 점수 계산 및 상세한 매집 이유 생성
 def get_total_strategy_score(df):
     if len(df) < 15: return 0, "데이터 부족"
     
-    # ① 수급 점수 (최근 거래량 폭발 여부)
     vol_ratio = df['Volume'].iloc[-3:].mean() / df['Volume'].iloc[-15:].mean()
-    
-    # ② 저평가 점수 (최근 15일 고점 대비 얼마나 바닥인지)
     highest = df['High'].iloc[-15:].max()
     value_ratio = highest / df['Close'].iloc[-1] if df['Close'].iloc[-1] > 0 else 0
-    
-    # ③ 기술적 반등 점수 (15일 이평선 돌파 및 안착 여부)
     ma15 = df['Close'].rolling(15).mean().iloc[-1]
     rebound_ratio = ma15 / df['Close'].iloc[-1] if df['Close'].iloc[-1] > 0 else 0
     
-    # 종합 점수 산출
     total_score = vol_ratio * value_ratio * rebound_ratio
     
-    # 📝 [핵심 추가] 조건별 수치를 해석해서 상세한 리포트 문장 작성
     reason_list = []
     if vol_ratio > 1.5:
         reason_list.append(f"🔥 평소 대비 거래량 {vol_ratio:.1f}배 폭발")
@@ -42,7 +42,6 @@ def get_total_strategy_score(df):
     if rebound_ratio >= 0.95 and rebound_ratio <= 1.05:
         reason_list.append("📈 15일 이평선 안착")
         
-    # 만약 특별한 징후가 평범하다면 종합 코멘트 처리
     if len(reason_list) == 0:
         comment = "⚙️ 3대 조건 완만하게 상승 전환 중"
     else:
@@ -50,7 +49,7 @@ def get_total_strategy_score(df):
     
     return total_score, comment
 
-# ⚡ 각 시장의 상위 종목 고속 스캔
+# 3. 추천 종목 산출
 def get_ai_recommendations(df):
     results = []
     for _, row in df.head(20).iterrows():
@@ -72,7 +71,7 @@ def get_ai_recommendations(df):
         
     return pd.DataFrame(results).sort_values(by='Score', ascending=False).head(5).reset_index(drop=True)
 
-# 3. UI 구성 (사이드바)
+# 4. UI 구성 (사이드바)
 st.sidebar.header("⚙️ AI 분석 설정")
 st.sidebar.info("💡 수급, 낙폭과대, 이평선 안착을 동시에 만족하는 종목을 찾고 구체적인 이유를 분석합니다.")
 
@@ -87,18 +86,30 @@ st.sidebar.markdown("---")
 st.sidebar.header("📺 유튜브 당일 내용 입력")
 youtube_input = st.sidebar.text_area(
     "제미나이가 알려준 오늘 자 요약 내용을 그대로 복사(Ctrl+C)해서 여기에 붙여넣기(Ctrl+V) 하세요.",
-    height=250,
+    height=150,
     placeholder="여기에 붙여넣으면 오른쪽에 바로 나타납니다!"
 )
 
 # 🔍 상세 종목 차트 설정 구역
 st.sidebar.markdown("---")
-st.sidebar.header("🔍 상세 종목 차트")
+st.sidebar.header("🔍 상세 차트 시간 설정")
 selected_name = st.sidebar.selectbox("종목명 검색", all_stocks['Name'].tolist())
-target_code = all_stocks[all_stocks['Name'] == selected_name]['Code'].values[0]
+target_code = all_stocks[all_stocks['Name'] == selected_name].iloc[0]['Code']
 
-if st.sidebar.button("🔄 차트 갱신"): 
-    st.rerun()
+chart_interval = st.sidebar.selectbox(
+    "차트 시간 단위 선택",
+    ["1분봉 보기", "5분봉 보기", "15분봉 보기", "30분봉 보기", "1시간봉 보기", "일봉 보기"]
+)
+
+interval_map = {
+    "1분봉 보기": ("1m", "1d"),
+    "5분봉 보기": ("5m", "1d"),
+    "15분봉 보기": ("15m", "1d"),
+    "30분봉 보기": ("30m", "2d"),
+    "1시간봉 보기": ("60m", "7d"),
+    "일봉 보기": ("1d", "3mo")
+}
+yf_interval, yf_period = interval_map[chart_interval]
 
 # 메인 레이아웃 분할 (좌측 2 : 우측 1)
 main_col, side_col = st.columns([2, 1])
@@ -107,7 +118,6 @@ with main_col:
     def display_recommendations(recs, title):
         st.subheader(title)
         if recs is not None and not recs.empty:
-            # 5선 서식이 깨지지 않도록 세로로 깔끔하게 리포트 형식 출력
             for idx, row in recs.iterrows():
                 with st.expander(f"👑 TOP {idx+1} : {row['Name']} ({row['Code']})", expanded=True):
                     st.info(f"**분석 결과:** {row['Reason']}")
@@ -119,26 +129,74 @@ with main_col:
 
     st.markdown("---")
 
-    # 상세 차트 화면 표시
-    st.header(f"📊 {selected_name} ({target_code})")
+    # 📊 상세 차트 구역
+    st.header(f"📊 {selected_name} ({target_code}) - {chart_interval}")
+    
+    # 네이버 주가 다이렉트 새 창 연결 링크 버튼
+    naver_pop_url = f"https://m.stock.naver.com/domestic/stock/{target_code}/total"
+    st.link_button(f"🔗 {selected_name} 네이버 증권 실시간 호가/차트 새 창으로 열기", naver_pop_url, use_container_width=True)
+    
+    # 📈 내부 분봉 생성
+    with st.spinner('실시간 분봉 데이터를 가공하고 있습니다...'):
+        try:
+            is_kospi = target_code in fdr.StockListing('KOSPI')['Code'].values
+            yf_symbol = f"{target_code}.KS" if is_kospi else f"{target_code}.KQ"
+            
+            ticker = yf.Ticker(yf_symbol)
+            df_mini = ticker.history(period=yf_period, interval=yf_interval)
+            
+            if not df_mini.empty:
+                # 🛠️ [한글화 마법] 마우스 갖다 댔을 때 뜰 한글 가이드 텍스트 미리 생성
+                # 정수형으로 변환 후 천단위 쉼표(,) + '원' 문구 결합
+                hover_texts = []
+                for idx, row in df_mini.iterrows():
+                    # 시간 포맷팅 (분봉일 땐 시:분까지, 일봉일 땐 날짜만)
+                    time_str = idx.strftime('%Y-%m-%d %H:%M') if yf_interval != "1d" else idx.strftime('%Y-%m-%d')
+                    
+                    text = (
+                        f"<b>⏰ 일시:</b> {time_str}<br>"
+                        f"<b>📈 시가:</b> {int(row['Open']):,}원<br>"
+                        f"<b>🔥 고가:</b> {int(row['High']):,}원<br>"
+                        f"<b>📉 저가:</b> {int(row['Low']):,}원<br>"
+                        f"<b>💎 종가:</b> {int(row['Close']):,}원<br>"
+                        f"<b>📊 거래량:</b> {int(row['Volume']):,}주"
+                    )
+                    hover_texts.append(text)
 
-    try:
-        df = fdr.DataReader(target_code, start=(datetime.now() - timedelta(days=180)))
-        fig = go.Figure(data=[go.Candlestick(
-            x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
-            increasing_line_color='red', decreasing_line_color='blue'
-        )])
-        fig.update_layout(height=400, template="plotly_white", xaxis_rangeslider_visible=False)
-        st.plotly_chart(fig, use_container_width=True)
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("현재가", f"{int(df['Close'].iloc[-1]):,}원")
-        diff = df['Close'].iloc[-1] - df['Open'].iloc[-1]
-        rate = (diff / df['Open'].iloc[-1]) * 100
-        c2.metric("시가 대비 등락", f"{int(diff):,}원", f"{rate:.2f}%")
-        c3.metric("거래량", f"{int(df['Volume'].iloc[-1]):,}")
-    except:
-        st.error("차트 데이터를 불러올 수 없습니다.")
+                # 캔들스틱 차트 생성
+                fig = go.Figure(data=[go.Candlestick(
+                    x=df_mini.index,
+                    open=df_mini['Open'],
+                    high=df_mini['High'],
+                    low=df_mini['Low'],
+                    close=df_mini['Close'],
+                    increasing_line_color='red',   # 한국식 빨간양봉
+                    decreasing_line_color='blue',  # 한국식 파란음봉
+                    text=hover_texts,              # 위에서 가공한 한글 텍스트 대입
+                    hoverinfo="text"               # 원래 뜨던 영어 싹 다 지우고 내가 만든 텍스트만 띄우기
+                )])
+                
+                # 🛠️ [원화 레이블 마법] 우측 Y축 가격표에 K, M 지우고 천단위 쉼표와 '원' 강제 부착
+                fig.update_layout(
+                    height=450, 
+                    margin=dict(l=10, r=10, t=10, b=10),
+                    xaxis_rangeslider_visible=False,
+                    yaxis=dict(
+                        tickformat=",.0f",         # 소수점 없애고 천단위 쉼표 지정
+                        ticksuffix="원",            # 숫자 뒤에 '원' 추가
+                        side="right"               # 한국인에게 익숙한 우측 주가축 설정
+                    ),
+                    hoverlabel=dict(
+                        bgcolor="white",           # 한글 대화창 배경색 깔끔하게 흰색으로
+                        font_size=13,              # 가독성 높은 글씨 크기
+                        font_family="Malgun Gothic" # 맑은 고딕 지정
+                    )
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("⚠️ 주말이거나 장 개시 전이라 실시간 분봉 데이터가 일시적으로 비어있습니다.")
+        except Exception as e:
+            st.error("🚨 글로벌 금융 통신 지연이 발생했습니다. 위의 [네이버 증권 열기] 버튼을 이용해 실시간 대응해 주세요.")
 
 # 우측 영역: 메모장 텍스트 즉시 출력
 with side_col:
