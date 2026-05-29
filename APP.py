@@ -3,13 +3,15 @@ import pandas as pd
 import FinanceDataReader as fdr
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+import sys
+import os
 
-# 서버 환경 안전장치용 yfinance 임포트
+# 스트림릿 클라우드 서버 환경에서 패키지 강제 로드 안전장치
 try:
     import yfinance as yf
 except ImportError:
-    import os
-    os.system('pip install yfinance')
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "yfinance", "lxml"])
     import yfinance as yf
 
 st.set_page_config(page_title="AI 매집주 분석기", layout="wide")
