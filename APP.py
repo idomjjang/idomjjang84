@@ -4,6 +4,7 @@ import FinanceDataReader as fdr
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
+# 서버 환경 안전장치용 yfinance 임포트
 try:
     import yfinance as yf
 except ImportError:
@@ -146,11 +147,9 @@ with main_col:
             df_mini = ticker.history(period=yf_period, interval=yf_interval)
             
             if not df_mini.empty:
-                # 🛠️ [한글화 마법] 마우스 갖다 댔을 때 뜰 한글 가이드 텍스트 미리 생성
-                # 정수형으로 변환 후 천단위 쉼표(,) + '원' 문구 결합
+                # 마우스 전용 한글 툴팁 가이드 생성
                 hover_texts = []
                 for idx, row in df_mini.iterrows():
-                    # 시간 포맷팅 (분봉일 땐 시:분까지, 일봉일 땐 날짜만)
                     time_str = idx.strftime('%Y-%m-%d %H:%M') if yf_interval != "1d" else idx.strftime('%Y-%m-%d')
                     
                     text = (
@@ -172,24 +171,24 @@ with main_col:
                     close=df_mini['Close'],
                     increasing_line_color='red',   # 한국식 빨간양봉
                     decreasing_line_color='blue',  # 한국식 파란음봉
-                    text=hover_texts,              # 위에서 가공한 한글 텍스트 대입
-                    hoverinfo="text"               # 원래 뜨던 영어 싹 다 지우고 내가 만든 텍스트만 띄우기
+                    text=hover_texts,              
+                    hoverinfo="text"               
                 )])
                 
-                # 🛠️ [원화 레이블 마법] 우측 Y축 가격표에 K, M 지우고 천단위 쉼표와 '원' 강제 부착
+                # Y축 원화 포맷팅 및 한글 패치 완료
                 fig.update_layout(
                     height=450, 
                     margin=dict(l=10, r=10, t=10, b=10),
                     xaxis_rangeslider_visible=False,
                     yaxis=dict(
-                        tickformat=",.0f",         # 소수점 없애고 천단위 쉼표 지정
-                        ticksuffix="원",            # 숫자 뒤에 '원' 추가
-                        side="right"               # 한국인에게 익숙한 우측 주가축 설정
+                        tickformat=",.0f",         
+                        ticksuffix="원",            
+                        side="right"               
                     ),
                     hoverlabel=dict(
-                        bgcolor="white",           # 한글 대화창 배경색 깔끔하게 흰색으로
-                        font_size=13,              # 가독성 높은 글씨 크기
-                        font_family="Malgun Gothic" # 맑은 고딕 지정
+                        bgcolor="white",           
+                        font_size=13,              
+                        font_family="Malgun Gothic" 
                     )
                 )
                 st.plotly_chart(fig, use_container_width=True)
