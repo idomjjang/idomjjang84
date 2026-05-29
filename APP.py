@@ -11,7 +11,7 @@ try:
     import yfinance as yf
 except ImportError:
     import subprocess
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "yfinance", "lxml"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "yfinance"])
     import yfinance as yf
 
 st.set_page_config(page_title="AI 매집주 분석기", layout="wide")
@@ -127,6 +127,7 @@ with main_col:
         else:
             st.info("왼쪽 [분석 실행] 버튼을 누르면 상세한 분석 이유와 함께 추천 종목이 산출됩니다.")
 
+    # 원래 코드에 있던 매집주 TOP 5 추천 리스트 정상 출력 구역
     if 'kospi_recs' in st.session_state: display_recommendations(st.session_state.kospi_recs, "🏛️ 코스피 상세 분석 베스트 5")
     if 'kosdaq_recs' in st.session_state: display_recommendations(st.session_state.kosdaq_recs, "🧬 코스닥 상세 분석 베스트 5")
 
@@ -135,6 +136,28 @@ with main_col:
     # 📊 상세 차트 구역
     st.header(f"📊 {selected_name} ({target_code}) - {chart_interval}")
     
+    # 📈 [신규 보강] 현재가, 등락률, 시가총액 실시간 카드 배치 구역
+    try:
+        is_kospi = target_code in fdr.StockListing('KOSPI')['Code'].values
+        yf_symbol = f"{target_code}.KS" if is_kospi else f"{target_code}.KQ"
+        
+        ticker = yf.Ticker(yf_symbol)
+        info = ticker.info
+        
+        price = info.get('currentPrice', info.get('regularMarketPrice', 0))
+        prev_close = info.get('previousClose', 0)
+        diff = price - prev_close
+        diff_rate = (diff / prev_close) * 100 if prev_close != 0 else 0
+        
+        # 3열 구조로 깔끔하게 숫자 카드 표시
+        c1, c2, c3 = st.columns(3)
+        c1.metric("현재가", f"{price:,}원", f"{diff:,.0f}원")
+        c2.metric("등락률", f"{diff_rate:.2f}%", f"{'▲' if diff > 0 else '▼'}")
+        c3.metric("시가총액", f"{info.get('marketCap', 0) / 100000000:.0f}억원")
+        st.markdown("---")
+    except Exception as e:
+        st.info("💡 실시간 상세 지표를 동기화하고 있습니다...")
+
     # 네이버 주가 다이렉트 새 창 연결 링크 버튼
     naver_pop_url = f"https://m.stock.naver.com/domestic/stock/{target_code}/total"
     st.link_button(f"🔗 {selected_name} 네이버 증권 실시간 호가/차트 새 창으로 열기", naver_pop_url, use_container_width=True)
@@ -142,10 +165,6 @@ with main_col:
     # 📈 내부 분봉 생성
     with st.spinner('실시간 분봉 데이터를 가공하고 있습니다...'):
         try:
-            is_kospi = target_code in fdr.StockListing('KOSPI')['Code'].values
-            yf_symbol = f"{target_code}.KS" if is_kospi else f"{target_code}.KQ"
-            
-            ticker = yf.Ticker(yf_symbol)
             df_mini = ticker.history(period=yf_period, interval=yf_interval)
             
             if not df_mini.empty:
